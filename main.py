@@ -1,5 +1,5 @@
 import os
-from flask import Flask, request, render_template_string
+from flask import Flask, request, render_template_string, redirect, url_for
 from google import genai
 
 app = Flask(__name__)
@@ -7,7 +7,7 @@ app = Flask(__name__)
 # Fetch the key securely from Render's Environment settings
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
-# Initialize the Google Gemini Client safely
+# Initialize the Google Gemini Client safely using the new google-genai SDK
 if GEMINI_API_KEY:
     ai_client = genai.Client(api_key=GEMINI_API_KEY)
 else:
@@ -62,8 +62,13 @@ Always end your reply with this disclaimer:
 def home():
     return render_template_string(UPLOAD_HTML)
 
-@app.route('/upload', methods=['POST'])
+@app.route('/upload', methods=['GET', 'POST'])
 def upload():
+    # FIX FOR image_cac2ec.png: If a user refreshes their result page or 
+    # directly visits the URL via a GET request, gracefully redirect them home.
+    if request.method == 'GET':
+        return redirect(url_for('home'))
+
     if not ai_client:
         return "<h3>Error: GEMINI_API_KEY is not set in Render Environment Variables.</h3>", 500
 
@@ -78,19 +83,19 @@ def upload():
     file.save(local_path)
     
     try:
-        # Upload the temporary image to Gemini
+        # Upload the temporary image to Gemini File API
         uploaded_file = ai_client.files.upload(file=local_path)
         
-        # Request evaluation report
+        # Request evaluation report using the proper standard endpoint schema
         response = ai_client.models.generate_content(
             model='gemini-1.5-flash',
             contents=[uploaded_file, MEDICAL_INSTRUCTIONS]
         )
         
-        # Clean up the file from Google Cloud
+        # Clean up the remote file footprint from Google Cloud
         ai_client.files.delete(name=uploaded_file.name)
         
-        # Return a beautifully formatted verification report page straight to the user's mobile screen
+        # Return a beautifully formatted verification report page straight to the screen
         return f"""
         <!DOCTYPE html>
         <html>
