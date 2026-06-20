@@ -1,18 +1,19 @@
 import os
-import requests
-from flask import Flask, request, render_template_string, jsonify
+from flask import Flask, request, render_template_string
 from google import genai
 
 app = Flask(__name__)
 
-# --- CONFIGURATION ---
-GEMINI_API_KEY = "YOUR_GEMINI_API_KEY_HERE"
-BULKGATE_API_URL = "https://portal.bulkgate.com/api/1.0/viber/transactional" 
-BULKGATE_TOKEN = "YOUR_BULKGATE_APPLICATION_TOKEN"
+# Fetch the key securely from Render's Environment settings
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
-ai_client = genai.Client(api_key=GEMINI_API_KEY)
+# Initialize the Google Gemini Client safely
+if GEMINI_API_KEY:
+    ai_client = genai.Client(api_key=GEMINI_API_KEY)
+else:
+    ai_client = None
 
-# Simple HTML layout for a mobile upload button
+# A clean, mobile-friendly landing page layout
 UPLOAD_HTML = """
 <!DOCTYPE html>
 <html>
@@ -20,19 +21,24 @@ UPLOAD_HTML = """
     <meta name='viewport' content='width=device-width, initial-scale=1.0'>
     <title>Rx Cloud Verifier</title>
     <style>
-        body { font-family: Arial, sans-serif; text-align: center; padding: 20px; background-color: #f4f6f9; }
-        .card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); max-width: 400px; margin: 0 auto; }
-        input[type="file"] { margin: 20px 0; }
-        button { background: #6f42c1; color: white; border: none; padding: 12px 24px; border-radius: 6px; font-size: 16px; cursor: pointer; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; text-align: center; padding: 20px; background-color: #f8f9fa; color: #333; }
+        .card { background: white; padding: 30px; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); max-width: 450px; margin: 40px auto 0 auto; }
+        h2 { color: #6f42c1; margin-bottom: 8px; }
+        p { color: #666; font-size: 14px; margin-bottom: 24px; }
+        .file-input-wrapper { margin: 20px 0; }
+        button { background: #6f42c1; color: white; border: none; padding: 14px 28px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; width: 100%; transition: background 0.2s; }
+        button:hover { background: #5a32a3; }
     </style>
 </head>
 <body>
     <div class="card">
-        <h2>📷 Upload Prescription</h2>
-        <p>The AI analysis will be typed directly into your team's Viber group.</p>
+        <h2>📷 Rx Verification Tool</h2>
+        <p>Upload a clear photo of the prescription or medication container label for an instant validation check.</p>
         <form action="/upload" method="post" enctype="multipart/form-data">
-            <input type="file" name="rx_image" accept="image/*" required><br>
-            <button type="submit">Verify & Send to Viber</button>
+            <div class="file-input-wrapper">
+                <input type="file" name="rx_image" accept="image/*" required style="font-size: 14px;">
+            </div>
+            <button type="submit">Analyze Prescription</button>
         </form>
     </div>
 </body>
@@ -40,23 +46,17 @@ UPLOAD_HTML = """
 """
 
 MEDICAL_INSTRUCTIONS = """
-You are an expert pharmaceutical assistant. Analyze this prescription image.
-List out:
+You are an advanced pharmaceutical assistant AI. Carefully look at the uploaded image.
+Extract and verify:
 1. Patient Name 
-2. Medication Name & Strength
-3. Frequency instructions
-State if it looks clear and accurate, highlighting any errors in bold.
-"""
+2. Medication Name (accounting for brand vs generic variants)
+3. Dosage and strength
+4. Frequency/Directions for use
 
-def send_to_viber_group(text_report):
-    """Uses BulkGate / Automation platform to push text back to your team group."""
-    payload = {
-        "application_id": "YOUR_APP_ID",
-        "application_token": BULKGATE_TOKEN,
-        "number": "YOUR_GROUP_OR_PHARMACIST_NUMBER",
-        "text": f"--- AUTOMATED RX EVALUATION ---\n{text_report}"
-    }
-    requests.post(BULKGATE_API_URL, json=payload)
+List your evaluation clearly using itemized bullet points. If you detect any discrepancies, potential errors, or unclear handwriting, highlight them in bold text.
+Always end your reply with this disclaimer:
+"DISCLAIMER: This analysis is AI-generated for educational reference only and does not replace a pharmacist's physical validation. Always verify with a medical professional before dispensing or consuming medication."
+"""
 
 @app.route('/')
 def home():
@@ -64,28 +64,60 @@ def home():
 
 @app.route('/upload', methods=['POST'])
 def upload():
+    if not ai_client:
+        return "<h3>Error: GEMINI_API_KEY is not set in Render Environment Variables.</h3>", 500
+
     if 'rx_image' not in request.files:
         return "No image uploaded", 400
         
     file = request.files['rx_image']
+    if file.filename == '':
+        return "No selected file", 400
+
     local_path = "temp_cloud_rx.jpg"
     file.save(local_path)
     
     try:
-        # Step 2: Process with Gemini AI
+        # Upload the temporary image to Gemini
         uploaded_file = ai_client.files.upload(file=local_path)
+        
+        # Request evaluation report
         response = ai_client.models.generate_content(
             model='gemini-1.5-flash',
             contents=[uploaded_file, MEDICAL_INSTRUCTIONS]
         )
+        
+        # Clean up the file from Google Cloud
         ai_client.files.delete(name=uploaded_file.name)
         
-        # Step 3: Broadcast results straight into the Viber Chat
-        send_to_viber_group(response.text)
-        
-        return "<h3>Success! The analysis has been sent directly to your Viber group chat. You can close this tab.</h3>"
+        # Return a beautifully formatted verification report page straight to the user's mobile screen
+        return f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+            <title>Verification Report</title>
+            <style>
+                body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; padding: 20px; background-color: #f8f9fa; color: #333; }}
+                .report-card {{ background: white; padding: 24px; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); max-width: 550px; margin: 20px auto; text-align: left; }}
+                h2 {{ color: #28a745; text-align: center; margin-top: 0; }}
+                hr {{ border: 0; border-top: 1px solid #eee; margin: 16px 0; }}
+                .content {{ white-space: pre-wrap; line-height: 1.6; font-size: 15px; }}
+                .back-btn {{ display: block; text-align: center; background: #6f42c1; color: white; text-decoration: none; padding: 12px; border-radius: 8px; font-weight: bold; margin-top: 24px; }}
+            </style>
+        </head>
+        <body>
+            <div class="report-card">
+                <h2>📋 Verification Analysis</h2>
+                <hr>
+                <div class="content">{response.text}</div>
+                <a href="/" class="back-btn">Scan Another Image</a>
+            </div>
+        </body>
+        </html>
+        """
     except Exception as e:
-        return f"Error: {str(e)}", 500
+        return f"<h3>Processing Error: {str(e)}</h3><p>Make sure your API Key is valid and active.</p>", 500
     finally:
         if os.path.exists(local_path):
             os.remove(local_path)
