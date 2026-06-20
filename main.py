@@ -45,6 +45,33 @@ UPLOAD_HTML = """
 </html>
 """
 
+# HTML template string for results page (Using traditional placeholders %s to bypass f-string CSS clash)
+REPORT_HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+    <title>Verification Report</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; padding: 20px; background-color: #f8f9fa; color: #333; }
+        .report-card { background: white; padding: 24px; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); max-width: 550px; margin: 20px auto; text-align: left; }
+        h2 { color: #28a745; text-align: center; margin-top: 0; }
+        hr { border: 0; border-top: 1px solid #eee; margin: 16px 0; }
+        .content { white-space: pre-wrap; line-height: 1.6; font-size: 15px; }
+        .back-btn { display: block; text-align: center; background: #6f42c1; color: white; text-decoration: none; padding: 12px; border-radius: 8px; font-weight: bold; margin-top: 24px; }
+    </style>
+</head>
+<body>
+    <div class="report-card">
+        <h2>📋 Verification Analysis</h2>
+        <hr>
+        <div class="content">%s</div>
+        <a href="/" class="back-btn">Scan Another Image</a>
+    </div>
+</body>
+</html>
+"""
+
 MEDICAL_INSTRUCTIONS = """
 You are an advanced pharmaceutical assistant AI. Carefully look at the uploaded image.
 Extract and verify:
@@ -64,8 +91,6 @@ def home():
 
 @app.route('/upload', methods=['GET', 'POST'])
 def upload():
-    # Fix for image_cac2ec.png: If a user refreshes their result page or 
-    # directly visits the URL via a GET request, gracefully redirect them home.
     if request.method == 'GET':
         return redirect(url_for('home'))
 
@@ -86,7 +111,7 @@ def upload():
         # Upload the temporary image to Gemini File API
         uploaded_file = ai_client.files.upload(file=local_path)
         
-        # Request evaluation report using the proper standard endpoint schema with the correct model format
+        # Request evaluation report
         response = ai_client.models.generate_content(
             model='gemini-2.5-flash',
             contents=[uploaded_file, MEDICAL_INSTRUCTIONS]
@@ -95,20 +120,15 @@ def upload():
         # Clean up the remote file footprint from Google Cloud
         ai_client.files.delete(name=uploaded_file.name)
         
-        # Return a beautifully formatted verification report page straight to the screen
-        return f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-            <title>Verification Report</title>
-            <style>
-                body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; padding: 20px; background-color: #f8f9fa; color: #333; }}
-                .report-card {{ background: white; padding: 24px; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); max-width: 550px; margin: 20px auto; text-align: left; }}
-                h2 {{ color: #28a745; text-align: center; margin-top: 0; }}
-                hr {{ border: 0; border-top: 1px solid #eee; margin: 16px 0; }}
-                .content {{ white-space: pre-wrap; line-height: 1.6; font-size: 15px; }}
-                .back-btn {{ display: block; text-align: center; background: #6f42c1; color: white; text-decoration: none; padding: 12px; border-radius: 8px; font-weight: bold; margin-top: 24px; }}
-            </style>
-        </head>
-        <body>
+        # Safely insert the markdown evaluation text into our static HTML template
+        return REPORT_HTML_TEMPLATE % response.text
+
+    except Exception as e:
+        return f"<h3>Processing Error: {str(e)}</h3><p>Make sure your API Key is valid and active.</p>", 500
+    finally:
+        if os.path.exists(local_path):
+            os.remove(local_path)
+
+if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
