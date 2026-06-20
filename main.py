@@ -64,7 +64,7 @@ def home():
 
 @app.route('/upload', methods=['GET', 'POST'])
 def upload():
-    # FIX FOR image_cac2ec.png: If a user refreshes their result page or 
+    # Fix for image_cac2ec.png: If a user refreshes their result page or 
     # directly visits the URL via a GET request, gracefully redirect them home.
     if request.method == 'GET':
         return redirect(url_for('home'))
@@ -86,9 +86,9 @@ def upload():
         # Upload the temporary image to Gemini File API
         uploaded_file = ai_client.files.upload(file=local_path)
         
-        # Request evaluation report using the proper standard endpoint schema
+        # Request evaluation report using the proper standard endpoint schema with the correct model format
         response = ai_client.models.generate_content(
-            model='gemini-1.5-flash',
+            model='gemini-2.5-flash',
             contents=[uploaded_file, MEDICAL_INSTRUCTIONS]
         )
         
@@ -112,21 +112,3 @@ def upload():
             </style>
         </head>
         <body>
-            <div class="report-card">
-                <h2>📋 Verification Analysis</h2>
-                <hr>
-                <div class="content">{response.text}</div>
-                <a href="/" class="back-btn">Scan Another Image</a>
-            </div>
-        </body>
-        </html>
-        """
-    except Exception as e:
-        return f"<h3>Processing Error: {str(e)}</h3><p>Make sure your API Key is valid and active.</p>", 500
-    finally:
-        if os.path.exists(local_path):
-            os.remove(local_path)
-
-if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
